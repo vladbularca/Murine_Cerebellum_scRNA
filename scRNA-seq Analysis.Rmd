@@ -8,11 +8,25 @@ date: "2025-05-13"
 knitr::opts_chunk$set(echo = TRUE)
 library("Seurat")
 library("tidyverse")
+library("Matrix")
 ```
 
 
 ```{r, echo=TRUE, results='hide', message=FALSE}
-summary(cars)
+raw_dir <- "GSE224466_RAW"
+all_files <- list.files(raw_dir, full.names = TRUE)
+
+# Extract unique sample prefixes
+prefixes <- unique(gsub("_(barcodes|matrix|features)\\.tsv\\.gz", "", basename(all_files)))
+
+# Create subfolders and move files
+for (prefix in prefixes) {
+  sample_dir <- file.path(raw_dir, prefix)
+  dir.create(sample_dir, showWarnings = FALSE)
+
+  files_to_move <- list.files(raw_dir, pattern = paste0("^", prefix, ".*\\.tsv\\.gz$"), full.names = TRUE)
+  file.rename(files_to_move, file.path(sample_dir, basename(files_to_move)))
+}
 ```
 
 
