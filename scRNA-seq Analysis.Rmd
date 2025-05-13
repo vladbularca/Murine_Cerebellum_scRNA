@@ -1,0 +1,22 @@
+---
+title: "Murine Cerebellum scRNA-seq Analysis"
+output: html_document
+date: "2025-05-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("Seurat")
+library("tidyverse")
+```
+
+
+```{r, echo=TRUE, results='hide', message=FALSE}
+summary(cars)
+```
+
+
+```{r }
+plot(pressure)
+```
+
