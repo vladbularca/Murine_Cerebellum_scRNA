@@ -14,23 +14,37 @@ library("Matrix")
 
 ```{r, echo=TRUE, results='hide', message=FALSE}
 raw_dir <- "GSE224466_RAW"
-all_files <- list.files(raw_dir, full.names = TRUE)
+all_files <- list.files(raw_dir, full.names = TRUE, recursive = FALSE)
 
 # Extract unique sample prefixes
-prefixes <- unique(gsub("_(barcodes|matrix|features)\\.tsv\\.gz", "", basename(all_files)))
+prefixes <- unique(gsub("_(barcodes|genes|matrix)\\.tsv$|_matrix\\.mtx$", "", basename(all_files)))
 
-# Create subfolders and move files
+
+# Create sub-folders and move files
 for (prefix in prefixes) {
   sample_dir <- file.path(raw_dir, prefix)
   dir.create(sample_dir, showWarnings = FALSE)
 
-  files_to_move <- list.files(raw_dir, pattern = paste0("^", prefix, ".*\\.tsv\\.gz$"), full.names = TRUE)
-  file.rename(files_to_move, file.path(sample_dir, basename(files_to_move)))
-}
+  files_to_move <- list.files(
+    raw_dir, 
+    pattern = paste0("^", prefix, ".*\\.(tsv|mtx)$"), full.names = TRUE)
+    
+  file.rename(files_to_move,
+            file.path(sample_dir, basename(files_to_move)))}
 ```
+
 
 
 ```{r }
-plot(pressure)
+# Reading each sample and creating a Seurat Object 
+
+seurat_list <- lapply(all_files, function(dir) {
+  sample_name <- basename(dir)
+  data <- Read10X(data.dir = dir)
+  seurat_obj <- CreateSeuratObject(counts = data, project = sample_name)
+  seurat_obj$sample <- sample_name
+  return(seurat_obj)
+})
 ```
 
+#E10 - E17 and P)
