@@ -14,6 +14,7 @@ library("Matrix")
 
 ```{r, echo=TRUE, results='hide', message=FALSE}
 raw_dir <- "GSE224466_RAW"
+
 all_files <- list.files(raw_dir, full.names = TRUE, recursive = FALSE)
 
 # Extract unique sample prefixes
@@ -44,7 +45,57 @@ seurat_list <- lapply(all_files, function(dir) {
   seurat_obj <- CreateSeuratObject(counts = data, project = sample_name)
   seurat_obj$sample <- sample_name
   return(seurat_obj)
+  
 })
 ```
 
-#E10 - E17 and P)
+```{r}
+# Checking to see if the sample names were applied correctly 
+
+names(seurat_list)
+lapply(seurat_list, function(x) x$sample[1])
+
+```
+
+```{r}
+# Determining Mitochondrial genes and ribosomal protein genes
+
+genes_file <- "GSE224466_RAW/GSM7024833_PAN_CB_E13_A/genes.tsv"
+
+genes_df <- read.table(genes_file, header = FALSE, col.names = c("ensembl_id", "gene_symbol"))
+
+mito_genes_symbols <- grep("^mt-", genes_df$gene_symbol, value = TRUE, ignore.case = TRUE)
+
+mito_ensembl_ids <- genes_df$ensembl_id[genes_df$gene_symbol %in% mito_genes_symbols]
+
+
+
+seurat_list <- lapply(seurat_list, function(seurat_obj) {
+  seurat_obj[["percent.mt"]] <- PercentageFeatureSet(seurat_obj, features = mito_genes_symbols)
+  return(seurat_obj)
+})
+
+head(seurat_list[[1]][["percent.mt"]])
+
+# seurat_list[[1]]@meta.data
+
+
+
+ribo_genes_symbols <- grep("^Rp[sl]", genes_df$gene_symbol, value = TRUE, ignore.case = TRUE)
+
+ribo_genes_symbols <- ribo_genes_symbols[!grepl("ka|kc|-ps", ribo_genes_symbols)]
+
+ribo_ensembl_ids <- genes_df$ensembl_id[genes_df$gene_symbol %in% ribo_genes_symbols]
+
+print(ribo_genes_symbols)
+
+seurat_list <- lapply(seurat_list, function(seurat_obj) {
+  seurat_obj[["percent.ribo"]] <- PercentageFeatureSet(seurat_obj, features = ribo_genes_symbols)
+  return(seurat_obj)
+})
+
+head(seurat_list[[1]][["percent.ribo"]])
+
+
+```
+
