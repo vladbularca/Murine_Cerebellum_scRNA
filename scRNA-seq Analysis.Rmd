@@ -9,15 +9,20 @@ knitr::opts_chunk$set(echo = TRUE)
 library("Seurat")
 library("tidyverse")
 library("Matrix")
+library("stringr")
 ```
 
 
 ```{r, echo=TRUE, results='hide', message=FALSE}
+
+# Preparing folder format for Seurat Object creation
+
 raw_dir <- "GSE224466_RAW"
 
 all_files <- list.files(raw_dir, full.names = TRUE, recursive = FALSE)
 
 # Extract unique sample prefixes
+
 prefixes <- unique(gsub("_(barcodes|genes|matrix)\\.tsv$|_matrix\\.mtx$", "", basename(all_files)))
 
 
@@ -37,7 +42,8 @@ for (prefix in prefixes) {
 
 
 ```{r }
-# Reading each sample and creating a Seurat Object 
+
+# Reading each sample and creating a Seurat list with 24 objects
 
 seurat_list <- lapply(all_files, function(dir) {
   sample_name <- basename(dir)
@@ -47,18 +53,27 @@ seurat_list <- lapply(all_files, function(dir) {
   return(seurat_obj)
   
 })
+
+# Exploring the data structure
+
+seurat_list[[1]]@meta.data
 ```
 
 ```{r}
 # Checking to see if the sample names were applied correctly 
 
-names(seurat_list)
 lapply(seurat_list, function(x) x$sample[1])
+
+# Number of cells with 0 RNA counts for each sample before filtering 
+
+sapply(seurat_list, function(seurat_obj) {sum(seurat_obj$nCount_RNA == 0, na.rm = TRUE)})
+
+# 12,13 and 14 have a very high percentage of cells with 0 UMI counts
 
 ```
 
 ```{r}
-# Determining Mitochondrial genes and ribosomal protein genes
+# Identifying mitochondrial and ribosomal protein genes
 
 genes_file <- "GSE224466_RAW/GSM7024833_PAN_CB_E13_A/genes.tsv"
 
@@ -68,7 +83,7 @@ mito_genes_symbols <- grep("^mt-", genes_df$gene_symbol, value = TRUE, ignore.ca
 
 mito_ensembl_ids <- genes_df$ensembl_id[genes_df$gene_symbol %in% mito_genes_symbols]
 
-
+print(mito_genes_symbols)
 
 seurat_list <- lapply(seurat_list, function(seurat_obj) {
   seurat_obj[["percent.mt"]] <- PercentageFeatureSet(seurat_obj, features = mito_genes_symbols)
@@ -76,8 +91,6 @@ seurat_list <- lapply(seurat_list, function(seurat_obj) {
 })
 
 head(seurat_list[[1]][["percent.mt"]])
-
-# seurat_list[[1]]@meta.data
 
 
 
@@ -96,6 +109,168 @@ seurat_list <- lapply(seurat_list, function(seurat_obj) {
 
 head(seurat_list[[1]][["percent.ribo"]])
 
+```
+``` {r}
+# Sub-setting the each object to filter out genes with over 10 % mitochondrial DNA and less than 3500 or 2000 unique transcripts and over 15,000 transcripts. 
+
+filtered_list <- lapply(seurat_list, function (seurat_obj) {
+  seurat_obj <- subset(seurat_obj, subset =  nCount_RNA > 3500 & nCount_RNA < 15000)
+  return (seurat_obj)
+})
+
+filtered_list2 <- lapply(seurat_list, function (seurat_obj) {
+  seurat_obj <- subset(seurat_obj, subset =  nCount_RNA > 2750 & nCount_RNA < 15000)
+  return (seurat_obj)
+})
+
+
+# Once this is applied, majority of the cells are already below the threshold of 10 percent, but I will filter to be sure.  
+
+filtered_list <- lapply(filtered_list, function (seurat_obj) {
+  seurat_obj <- subset(seurat_obj, subset = percent.mt < 10)
+  return (seurat_obj)
+})
+
+filtered_list2 <- lapply(filtered_list2, function (seurat_obj) {
+  seurat_obj <- subset(seurat_obj, subset = percent.mt < 10)
+  return (seurat_obj)
+})
+
+
+# Summary statistics for each object 
+
+lapply(filtered_list, function(seurat_obj) {summary(seurat_obj$nCount_RNA)})
+lapply(filtered_list2, function(seurat_obj) {summary(seurat_obj$nCount_RNA)})
+
+# Count of cells after filtering
+
+for (i in seq_along(filtered_list)) {cat("Sample", i, "has", ncol(filtered_list[[i]]), "cells after filtering\n")}
+
+for (i in seq_along(filtered_list2)) {cat("Sample", i, "has", ncol(filtered_list2[[i]]), "cells after filtering\n")}
+
+# Mean nCount_RNA after filtering
+sapply(filtered_list, function(obj) {tapply(obj$nCount_RNA, obj$sample, mean)})}
+sapply(filtered_list2, function(obj) {tapply(obj$nCount_RNA, obj$sample, mean)})}
+
 
 ```
 
+``` {r}
+# Violin plot for % of mitochondrial genes in the first sample, checking to confirm that no cells have MT content above the threshold. 
+
+VlnPlot(filtered_list[[1]], features = "percent.mt", pt.size = 0.1, layer = "counts") + NoLegend()
+
+VlnPlot(filtered_list[[1]], features = "percent.ribo", pt.size = 0.1, layer = "counts") + NoLegend()
+
+```
+
+
+
+``` {r}
+# Removing mitochondrial ribosomal genes
+
+genes_to_remove <- unique(c(mito_genes_symbols, ribo_genes_symbols))
+
+filtered_list <- lapply(filtered_list, function(seurat_obj) {
+  genes_keep <- setdiff(rownames(seurat_obj), genes_to_remove)
+  subset(seurat_obj, features = genes_keep)
+})
+
+filtered_list2 <- lapply(filtered_list2, function(seurat_obj) {
+  genes_keep <- setdiff(rownames(seurat_obj), genes_to_remove)
+  subset(seurat_obj, features = genes_keep)
+})
+
+
+```
+
+``` {r}
+# Additional summary statistics
+
+sapply(filtered_list, ncol)
+
+sum(sapply(filtered_list2, ncol))
+
+sapply(seurat_list, function(seurat_obj) {sum(seurat_obj$nCount_RNA == 0, na.rm = TRUE)})
+
+sapply(seurat_list, function(seurat_obj) {sum(seurat_obj$nCount_RNA > 2000 & seurat_obj$nCount_RNA < 15000, na.rm = TRUE)})
+
+
+```
+
+``` {r}
+
+# Merging the two replicates into one object 
+
+sample_names <- sapply(seurat_list, function(x) x$sample[1])
+
+names(seurat_list) <- sample_names
+names(filtered_list) <- sample_names
+names(filtered_list2) <- sample_names
+
+# 1. Extract “stage” (e.g. “E13” or “E12”) and “rep” (“A”/“B”)
+info <- str_match(
+  names(seurat_list),
+  # Regex breakdown:
+  #  .*PAN_CB_      literal
+  #  ([A-Za-z0-9]+?)  capture the stage code (non-greedy)
+  #  _?([AB])$        optional underscore then A or B at end of string
+  ".*PAN[-_]CB[-_]?([A-Za-z0-9]+?)[_-]?([ABCD])$"
+)
+
+# Create a data.frame of sample → stage → rep
+sample_info <- data.frame(
+  sample = names(seurat_list),
+  stage  = info[,2],
+  rep    = info[,3],
+  stringsAsFactors = FALSE
+)
+
+# 2. Group by stage
+stage_groups <- split(sample_info$sample, sample_info$stage)
+
+# 3. Merge the two replicates per stage
+filtered_list <- lapply(stage_groups, function(samples) {
+  # sanity check: each should have exactly 2 replicates
+  if(length(samples) != 2) {
+    warning("Stage ", names(stage_groups), " has ", length(samples), " samples!")
+  }
+  objs <- filtered_list[samples]
+  merged <- merge(
+    x = objs[[1]], 
+    y = objs[[2]], 
+    add.cell.ids = samples, 
+    project = paste0("PAN_CB_", names(stage_groups)[[1]])
+  )
+  merged$stage <- names(stage_groups)[[1]]
+  return(merged)
+})
+
+filtered_list2 <- lapply(stage_groups, function(samples) {
+  # sanity check: each should have exactly 2 replicates
+  if(length(samples) != 2) {
+    warning("Stage ", names(stage_groups), " has ", length(samples), " samples!")
+  }
+  objs <- filtered_list2[samples]
+  merged <- merge(
+    x = objs[[1]], 
+    y = objs[[2]], 
+    add.cell.ids = samples, 
+    project = paste0("PAN_CB_", names(stage_groups)[[1]])
+  )
+  merged$stage <- names(stage_groups)[[1]]
+  return(merged)
+})
+
+
+
+# Name the list by stage
+names(filtered_list) <- names(stage_groups)
+names(filtered_list2) <- names(stage_groups)
+
+# Check
+lapply(filtered_list, function(x) table(x$stage))
+sapply(filtered_list, ncol)
+sapply(filtered_list2, ncol)
+
+```
