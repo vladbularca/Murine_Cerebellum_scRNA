@@ -10,6 +10,9 @@ library("Seurat")
 library("tidyverse")
 library("Matrix")
 library("stringr")
+library("dplyr")
+library(ggplot2)
+library(reshape2)
 ```
 
 
@@ -18,7 +21,6 @@ library("stringr")
 # Preparing folder format for Seurat Object creation
 
 raw_dir <- "GSE224466_RAW"
-
 all_files <- list.files(raw_dir, full.names = TRUE, recursive = FALSE)
 
 # Extract unique sample prefixes
@@ -27,6 +29,7 @@ prefixes <- unique(gsub("_(barcodes|genes|matrix)\\.tsv$|_matrix\\.mtx$", "", ba
 
 
 # Create sub-folders and move files
+
 for (prefix in prefixes) {
   sample_dir <- file.path(raw_dir, prefix)
   dir.create(sample_dir, showWarnings = FALSE)
@@ -50,9 +53,7 @@ seurat_list <- lapply(all_files, function(dir) {
   data <- Read10X(data.dir = dir)
   seurat_obj <- CreateSeuratObject(counts = data, project = sample_name)
   seurat_obj$sample <- sample_name
-  return(seurat_obj)
-  
-})
+  return(seurat_obj)})
 
 # Exploring the data structure
 
@@ -76,11 +77,8 @@ sapply(seurat_list, function(seurat_obj) {sum(seurat_obj$nCount_RNA == 0, na.rm 
 # Identifying mitochondrial and ribosomal protein genes
 
 genes_file <- "GSE224466_RAW/GSM7024833_PAN_CB_E13_A/genes.tsv"
-
 genes_df <- read.table(genes_file, header = FALSE, col.names = c("ensembl_id", "gene_symbol"))
-
 mito_genes_symbols <- grep("^mt-", genes_df$gene_symbol, value = TRUE, ignore.case = TRUE)
-
 mito_ensembl_ids <- genes_df$ensembl_id[genes_df$gene_symbol %in% mito_genes_symbols]
 
 print(mito_genes_symbols)
@@ -95,9 +93,7 @@ head(seurat_list[[1]][["percent.mt"]])
 
 
 ribo_genes_symbols <- grep("^Rp[sl]", genes_df$gene_symbol, value = TRUE, ignore.case = TRUE)
-
 ribo_genes_symbols <- ribo_genes_symbols[!grepl("ka|kc|-ps", ribo_genes_symbols)]
-
 ribo_ensembl_ids <- genes_df$ensembl_id[genes_df$gene_symbol %in% ribo_genes_symbols]
 
 print(ribo_genes_symbols)
@@ -118,10 +114,17 @@ filtered_list <- lapply(seurat_list, function (seurat_obj) {
   return (seurat_obj)
 })
 
+
+saveRDS(filtered_list, file = "filtered_list.rds")
+#filtered_list <- readRDS("filtered_list.rds"
+
 filtered_list2 <- lapply(seurat_list, function (seurat_obj) {
   seurat_obj <- subset(seurat_obj, subset =  nCount_RNA > 2750 & nCount_RNA < 15000)
   return (seurat_obj)
 })
+
+saveRDS(filtered_list2, file = "filtered_list2.rds")
+#filtered_list <- readRDS("filtered_list.rds"
 
 
 # Once this is applied, majority of the cells are already below the threshold of 10 percent, but I will filter to be sure.  
@@ -149,11 +152,12 @@ for (i in seq_along(filtered_list)) {cat("Sample", i, "has", ncol(filtered_list[
 for (i in seq_along(filtered_list2)) {cat("Sample", i, "has", ncol(filtered_list2[[i]]), "cells after filtering\n")}
 
 # Mean nCount_RNA after filtering
-sapply(filtered_list, function(obj) {tapply(obj$nCount_RNA, obj$sample, mean)})}
-sapply(filtered_list2, function(obj) {tapply(obj$nCount_RNA, obj$sample, mean)})}
+sapply(filtered_list, function(obj) {tapply(obj$nCount_RNA, obj$sample, mean)})
+sapply(filtered_list2, function(obj) {tapply(obj$nCount_RNA, obj$sample, mean)})
 
 
 ```
+
 
 ``` {r}
 # Violin plot for % of mitochondrial genes in the first sample, checking to confirm that no cells have MT content above the threshold. 
@@ -167,7 +171,7 @@ VlnPlot(filtered_list[[1]], features = "percent.ribo", pt.size = 0.1, layer = "c
 
 
 ``` {r}
-# Removing mitochondrial ribosomal genes
+# Removing mitochondrial & ribosomal genes
 
 genes_to_remove <- unique(c(mito_genes_symbols, ribo_genes_symbols))
 
@@ -179,8 +183,9 @@ filtered_list <- lapply(filtered_list, function(seurat_obj) {
 filtered_list2 <- lapply(filtered_list2, function(seurat_obj) {
   genes_keep <- setdiff(rownames(seurat_obj), genes_to_remove)
   subset(seurat_obj, features = genes_keep)
+  
+# include removal of genes with 0 umis across samples
 })
-
 
 ```
 
@@ -189,7 +194,7 @@ filtered_list2 <- lapply(filtered_list2, function(seurat_obj) {
 
 sapply(filtered_list, ncol)
 
-sum(sapply(filtered_list2, ncol))
+sum(sapply(filtered_list, ncol))
 
 sapply(seurat_list, function(seurat_obj) {sum(seurat_obj$nCount_RNA == 0, na.rm = TRUE)})
 
@@ -198,14 +203,42 @@ sapply(seurat_list, function(seurat_obj) {sum(seurat_obj$nCount_RNA > 2000 & seu
 
 ```
 
+
+
 ``` {r}
-# Mergingreplicates into one object 
 
-sample_names <- sapply(seurat_list, function(x) x$sample[1])
-
-names(seurat_list) <- sample_names
+sample_names <- sapply(filtered_list, function(x) unique(x$sample))
 names(filtered_list) <- sample_names
 names(filtered_list2) <- sample_names
+
+summary_df <- data.frame(
+  Sample = names(filtered_list2),
+  Avg_nFeature_RNA = sapply(filtered_list, function(obj) mean(obj@meta.data$nFeature_RNA)),
+  Avg_nCount_RNA = sapply(filtered_list, function(obj) mean(obj@meta.data$nCount_RNA))
+)
+
+print(summary_df)
+
+melted_df <- melt(summary_df, id.vars = "Sample")
+
+# Plot both metrics side-by-side
+ggplot(melted_df, aes(x = Sample, y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Sample", y = "Average", fill = "") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("Average nFeature_RNA and nCount_RNA per Sample")
+
+
+```
+
+
+
+
+
+``` {r}
+# Merging replicates into one object 
+
+
 
 # 1. Extract “stage” (e.g. “E13” or “E12”) and “rep” (“A”/“B”)
 info <- str_match(
@@ -245,25 +278,8 @@ filtered_list <- lapply(stage_groups, function(samples) {
   return(merged)
 })
 
-filtered_list2 <- lapply(stage_groups, function(samples) {
-  # sanity check: each should have exactly 2 replicates
-  if(length(samples) != 2) {
-    warning("Stage ", names(stage_groups), " has ", length(samples), " samples!")
-  }
-  objs <- filtered_list2[samples]
-  merged <- merge(
-    x = objs[[1]], 
-    y = objs[[2]], 
-    add.cell.ids = samples, 
-    project = paste0("PAN_CB_", names(stage_groups)[[1]])
-  )
-  merged$stage <- names(stage_groups)[[1]]
-  return(merged)
-})
-
 # Name the list by stage
 names(filtered_list) <- names(stage_groups)
-names(filtered_list2) <- names(stage_groups)
 
 # Check
 lapply(filtered_list, function(x) table(x$stage))
@@ -271,6 +287,9 @@ sapply(filtered_list, ncol)
 sapply(filtered_list2, ncol)
 
 ```
+
+
+
 ``` {r}
 # Normalizing the data 
 
@@ -337,6 +356,11 @@ all_markers <- lapply(filtered_list, function(obj) {
   FindAllMarkers(obj, assay ="RNA", slot = "data", only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
 })
 
+all_markers <- Filter(function(df) {
+  is.data.frame(df) && nrow(df) > 0 && "cluster" %in% colnames(df)
+}, all_markers)
+
+
 all_markers2 <- lapply(filtered_list2, function(obj) {
   DefaultAssay(obj) <- "RNA"
   FindAllMarkers(obj, assay ="RNA", slot = "data", only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
@@ -344,7 +368,17 @@ all_markers2 <- lapply(filtered_list2, function(obj) {
 
 names(all_markers)
 
-``` 
+top_markers <- lapply(all_markers, function(df) {
+  df %>%
+    group_by(cluster) %>%
+    slice_max(order_by = avg_log2FC, n = 10) %>%
+    ungroup()
+})
+
+```
+
+
+
 ``` {r}
 
 ElbowPlot(filtered_list[[1]])
@@ -352,5 +386,9 @@ ElbowPlot(filtered_list[[1]])
 #Visualization of UMAP
 
 DimPlot(filtered_list[[1]], reduction = "umap", label = TRUE, group.by = "seurat_clusters")
+DoHeatmap(obj, features = unique(top_markers[["E12"]]$gene))
+
+
 
 ``` 
+
