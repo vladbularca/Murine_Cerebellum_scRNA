@@ -11,8 +11,9 @@ library("tidyverse")
 library("Matrix")
 library("stringr")
 library("dplyr")
-library(ggplot2)
-library(reshape2)
+library("ggplot2")
+library("reshape2")
+library("purrr")
 ```
 
 
@@ -116,7 +117,7 @@ filtered_list <- lapply(seurat_list, function (seurat_obj) {
 
 
 saveRDS(filtered_list, file = "filtered_list.rds")
-#filtered_list <- readRDS("filtered_list.rds"
+# filtered_list <- readRDS("filtered_list.rds"
 
 filtered_list2 <- lapply(seurat_list, function (seurat_obj) {
   seurat_obj <- subset(seurat_obj, subset =  nCount_RNA > 2750 & nCount_RNA < 15000)
@@ -124,7 +125,7 @@ filtered_list2 <- lapply(seurat_list, function (seurat_obj) {
 })
 
 saveRDS(filtered_list2, file = "filtered_list2.rds")
-#filtered_list <- readRDS("filtered_list.rds"
+#filtered_list2 <- readRDS("filtered_list2.rds")
 
 
 # Once this is applied, majority of the cells are already below the threshold of 10 percent, but I will filter to be sure.  
@@ -183,8 +184,21 @@ filtered_list <- lapply(filtered_list, function(seurat_obj) {
 filtered_list2 <- lapply(filtered_list2, function(seurat_obj) {
   genes_keep <- setdiff(rownames(seurat_obj), genes_to_remove)
   subset(seurat_obj, features = genes_keep)
+})
   
-# include removal of genes with 0 umis across samples
+# Removing genes with 0 counts across all cells 
+  
+filtered_list <- lapply(filtered_list, function(obj) {
+  counts <- GetAssayData(obj, slot = "counts")
+  genes_to_keep <- rowSums(counts) > 0
+  subset(obj, features = names(genes_to_keep[genes_to_keep]))
+})
+
+
+filtered_list2 <- lapply(filtered_list2, function(obj) {
+  counts <- GetAssayData(obj, slot = "counts")
+  genes_to_keep <- rowSums(counts) > 0
+  subset(obj, features = names(genes_to_keep[genes_to_keep]))
 })
 
 ```
@@ -199,7 +213,6 @@ sum(sapply(filtered_list, ncol))
 sapply(seurat_list, function(seurat_obj) {sum(seurat_obj$nCount_RNA == 0, na.rm = TRUE)})
 
 sapply(seurat_list, function(seurat_obj) {sum(seurat_obj$nCount_RNA > 2000 & seurat_obj$nCount_RNA < 15000, na.rm = TRUE)})
-
 
 ```
 
@@ -236,104 +249,84 @@ ggplot(melted_df, aes(x = Sample, y = value, fill = variable)) +
 
 
 ``` {r}
-# Merging replicates into one object 
+# Merging all objects into one Seurat object 
 
-
-
-# 1. Extract “stage” (e.g. “E13” or “E12”) and “rep” (“A”/“B”)
-info <- str_match(
-  names(seurat_list),
-  # Regex breakdown:
-  #  .*PAN_CB_      literal
-  #  ([A-Za-z0-9]+?)  capture the stage code (non-greedy)
-  #  _?([AB])$        optional underscore then A or B at end of string
-  ".*PAN[-_]CB[-_]?([A-Za-z0-9]+?)[_-]?([ABCD])$"
-)
-
-# Create a data.frame of sample → stage → rep
-sample_info <- data.frame(
-  sample = names(seurat_list),
-  stage  = info[,2],
-  rep    = info[,3],
-  stringsAsFactors = FALSE
-)
-
-# 2. Group by stage
-stage_groups <- split(sample_info$sample, sample_info$stage)
-
-# 3. Merge the two replicates per stage
-filtered_list <- lapply(stage_groups, function(samples) {
-  # sanity check: each should have exactly 2 replicates
-  if(length(samples) != 2) {
-    warning("Stage ", names(stage_groups), " has ", length(samples), " samples!")
-  }
-  objs <- filtered_list[samples]
-  merged <- merge(
-    x = objs[[1]], 
-    y = objs[[2]], 
-    add.cell.ids = samples, 
-    project = paste0("PAN_CB_", names(stage_groups)[[1]])
-  )
-  merged$stage <- names(stage_groups)[[1]]
-  return(merged)
+filtered_list <- lapply(names(filtered_list), function(name) {
+  RenameCells(filtered_list[[name]], add.cell.id = name)
 })
+names(filtered_list) <- sample_names
+merged_obj <- reduce(filtered_list, merge)
 
-# Name the list by stage
-names(filtered_list) <- names(stage_groups)
 
-# Check
-lapply(filtered_list, function(x) table(x$stage))
-sapply(filtered_list, ncol)
-sapply(filtered_list2, ncol)
+filtered_list2 <- lapply(names(filtered_list2), function(name) {
+  RenameCells(filtered_list2[[name]], add.cell.id = name)
+})
+names(filtered_list2) <- sample_names
+merged_obj2 <- reduce(filtered_list2, merge)
 
 ```
-
 
 
 ``` {r}
 # Normalizing the data 
 
-filtered_list <- lapply(filtered_list, function(obj) {
-  obj <- NormalizeData(obj, verbose = FALSE)
-  obj <- FindVariableFeatures(obj, selection.method = "vst", nfeatures = 2000, verbose = FALSE) # Based on the 2000 most variable features
-  obj <- ScaleData(obj, vars.to.regress = c("percent.mt","nCount_RNA"), verbose = FALSE)
-  return(obj)
-})
+merged_obj <- NormalizeData(merged_obj, verbose = FALSE)
+merged_obj <- FindVariableFeatures(merged_obj, selection.method = "vst", nfeatures = 2000, verbose = FALSE) # Based on the 2000 most variable features
+merged_obj <- ScaleData(merged_obj, vars.to.regress = c("percent.mt","nCount_RNA"), verbose = FALSE)
 
-filtered_list2 <- lapply(filtered_list2, function(obj) {
-  obj <- NormalizeData(obj, verbose = FALSE)
-  obj <- FindVariableFeatures(obj, selection.method = "vst", nfeatures = 2000, verbose = FALSE)
-  obj <- ScaleData(obj, vars.to.regress = c("percent.mt","nCount_RNA"), verbose = FALSE)
-  return(obj)
-})
+
+merged_obj2 <- NormalizeData(merged_obj2, verbose = FALSE)
+merged_obj2 <- FindVariableFeatures(merged_obj2, selection.method = "vst", nfeatures = 2000, verbose = FALSE) # Based on the 2000 most variable features
+merged_obj2 <- ScaleData(merged_obj2, vars.to.regress = c("percent.mt","nCount_RNA"), verbose = FALSE)
 
 ``` 
 
+
 ``` {r}
 # PCA, clustering and UMAP
-filtered_list <- lapply(filtered_list, function(obj) {
-  obj <- RunPCA(obj, features = VariableFeatures(obj), npcs = min(30, ncol(obj) - 1), verbose = FALSE)
-  obj <- RunUMAP(obj, dims = 1:20, verbose = FALSE)
-  obj <- FindNeighbors(obj, dims = 1:20, verbose = FALSE)
-  obj <- FindClusters(obj, resolution = 0.5, verbose = FALSE)
-  return(obj)
-})
 
-# Potentially try using even more of the of the PCs, maybe 30 since the elbow has not been reached. 
+merged_obj <- RunPCA(merged_obj, features = VariableFeatures(merged_obj), npcs = 40, verbose = FALSE)
+merged_obj <- RunUMAP(merged_obj, dims = 1:40, verbose = FALSE)
+merged_obj <- FindNeighbors(merged_obj, dims = 1:40, verbose = FALSE)
+merged_obj <- FindClusters(merged_obj, resolution = 0.5, verbose = FALSE)
 
-filtered_list2 <- lapply(filtered_list2, function(obj) {
-  obj <- RunPCA(obj, features = VariableFeatures(obj), npcs = min(30, ncol(obj) - 1), verbose = FALSE)
-  obj <- RunUMAP(obj, dims = 1:20, verbose = FALSE)
-  obj <- FindNeighbors(obj, dims = 1:20, verbose = FALSE)
-  obj <- FindClusters(obj, resolution = 0.5, verbose = FALSE)
-  return(obj)
-})
+saveRDS(merged_obj, file = "merged_obj.rds")
+merged_obj <- readRDS("merged_obj.rds")
+
+merged_obj2 <- RunPCA(merged_obj2, features = VariableFeatures(merged_obj2), npcs = 40, verbose = FALSE)
+merged_obj2 <- RunUMAP(merged_obj2, dims = 1:40, verbose = FALSE)
+merged_obj2 <- FindNeighbors(merged_obj2, dims = 1:40, verbose = FALSE)
+merged_obj2 <- FindClusters(merged_obj2, resolution = 0.5, verbose = FALSE)
+
+saveRDS(merged_obj2, file = "merged_obj2.rds")
+merged_obj2 <- readRDS("merged_obj2.rds")
 
 # Cluster summary
-table(filtered_list[[1]]$seurat_clusters)
-table(filtered_list2[[1]]$seurat_clusters)
+table(merged_obj$seurat_clusters)
+table(merged_obj2$seurat_clusters)
 
 ```
+
+
+``` {r}
+# Checking # of PCAs to use for UMAP
+
+ElbowPlot(merged_obj, ndims = 40)
+ElbowPlot(merged_obj2, ndims = 40)
+
+#Visualization of UMAP
+
+DimPlot(merged_obj, reduction = "umap", label = TRUE, group.by = "seurat_clusters")
+DimPlot(merged_obj2, reduction = "umap", label = TRUE, group.by = "seurat_clusters")
+
+
+# DoHeatmap(obj, features = unique(top_markers[["E12"]]$gene))
+
+``` 
+
+
+
+
 
 
 ``` {r}
@@ -379,16 +372,4 @@ top_markers <- lapply(all_markers, function(df) {
 
 
 
-``` {r}
-
-ElbowPlot(filtered_list[[1]])
-
-#Visualization of UMAP
-
-DimPlot(filtered_list[[1]], reduction = "umap", label = TRUE, group.by = "seurat_clusters")
-DoHeatmap(obj, features = unique(top_markers[["E12"]]$gene))
-
-
-
-``` 
 
