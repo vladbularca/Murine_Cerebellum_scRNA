@@ -14,6 +14,9 @@ library("dplyr")
 library("ggplot2")
 library("reshape2")
 library("purrr")
+library("hdf5r")
+library("remotes")
+library("loupeR")
 ```
 
 
@@ -332,34 +335,21 @@ DimPlot(merged_obj2, reduction = "umap", label = TRUE, group.by = "seurat_cluste
 ``` {r}
 # Determination and Annotation of marker genes for each cluster
 
-filtered_list <- lapply(filtered_list, function(obj) {
-  DefaultAssay(obj) <- "RNA"
-  obj <- JoinLayers(obj)
-  return(obj)
-})
-
-filtered_list2<- lapply(filtered_list2, function(obj) {
-  DefaultAssay(obj) <- "RNA"
-  obj <- JoinLayers(obj)
-  return(obj)
-})
-
-all_markers <- lapply(filtered_list, function(obj) {
-  DefaultAssay(obj) <- "RNA"
-  FindAllMarkers(obj, assay ="RNA", slot = "data", only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
-})
-
-all_markers <- Filter(function(df) {
-  is.data.frame(df) && nrow(df) > 0 && "cluster" %in% colnames(df)
-}, all_markers)
+merged_obj <- JoinLayers(merged_obj)
+all_markers <- FindAllMarkers(merged_obj, assay ="RNA", slot = "data", only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
 
 
-all_markers2 <- lapply(filtered_list2, function(obj) {
-  DefaultAssay(obj) <- "RNA"
-  FindAllMarkers(obj, assay ="RNA", slot = "data", only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
-})
+merged_obj2 <- JoinLayers(merged_obj2)
+all_markers2 <- FindAllMarkers(merged_obj2, assay ="RNA", slot = "data", only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+
 
 names(all_markers)
+
+top_markers <- all_markers %>%
+    group_by(cluster) %>%
+    slice_max(order_by = avg_log2FC, n = 10) %>%
+    ungroup()
+
 
 top_markers <- lapply(all_markers, function(df) {
   df %>%
@@ -368,8 +358,21 @@ top_markers <- lapply(all_markers, function(df) {
     ungroup()
 })
 
+
 ```
 
+``` {r}
+merged_obj_1 <- JoinLayers(merged_obj)
 
+create_loupe_from_seurat(merged_obj_1, output_name = "loupe_1")
+
+merged_obj_2 <- JoinLayers(merged_obj2)
+
+create_loupe_from_seurat(merged_obj_2, output_name = "loupe_2")
+
+
+options(Seurat.object.assay.version = "v3")
+options(Seurat.object.assay.version = "v4")
+```
 
 
