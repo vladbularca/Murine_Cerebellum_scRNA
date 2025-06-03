@@ -350,18 +350,50 @@ top_markers <- all_markers %>%
     slice_max(order_by = avg_log2FC, n = 10) %>%
     ungroup()
 
-
-top_markers <- lapply(all_markers, function(df) {
-  df %>%
+top_markers2 <- all_markers2 %>%
     group_by(cluster) %>%
     slice_max(order_by = avg_log2FC, n = 10) %>%
     ungroup()
-})
 
 
 ```
 
+```{r}
+# Manual annotation of each cluster
+cluster_ids <- c(
+  "0" = "Midbrain Glutamatergic Cells", "1" = "", "2" = "", "3" = "Bergmann Glia", "4" = "",
+  "5" = "GABAergic Progenitors", "6" = "VZ? Progenitor Cells" ,"7" = "Glutamatergic CNs",
+  "8" = "GABAergic Interneurons", "9" = "Early Progenitor Cells","10" = "Roof Plate Cells",
+  "11" = "Radial Glial Cells", "12" = "Glutamatergic CNs", "13" = "Early Progenitor Cells", "14" = "Erythrocytes","15" = "GABAergic Interneurons","16" = "Endothelial Cell Precursors",
+  "17" = "Microglia", "18" = "Mesodermal Cells?", "19" = "GABAergic Interneurons?",
+  "20" = "Pericytes","21" = "Erythrocytes","22" = "Oligodendrocytes",
+  "23" = "Ciliated Cells")
+
+merged_obj <- RenameIdents(merged_obj, cluster_ids)
+
+
+
+cluster_ids2 <- c(
+  "0" = "Neural progenitor",
+  "1" = "Radial glia",
+  "2" = "Interneurons",
+  "3" = "Astrocytes",
+  "4" = "Excitatory neurons",
+  "5" = "Oligodendrocyte precursors",
+  ...
+)
+merged_obj <- RenameIdents(merged_obj, cluster_ids)
+
+# check cell labelin in Loupe and also CellxFate, see any differences
+```
+
+
+
+
+
 ``` {r}
+# Creating Loupe objects for further analysis
+
 merged_obj_1 <- JoinLayers(merged_obj)
 
 create_loupe_from_seurat(merged_obj_1, output_name = "loupe_1")
