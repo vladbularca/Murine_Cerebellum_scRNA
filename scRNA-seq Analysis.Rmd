@@ -361,16 +361,27 @@ top_markers2 <- all_markers2 %>%
 ```{r}
 # Manual annotation of each cluster
 cluster_ids <- c(
-  "0" = "Midbrain Glutamatergic Cells", "1" = "", "2" = "", "3" = "Bergmann Glia", "4" = "",
-  "5" = "GABAergic Progenitors", "6" = "VZ? Progenitor Cells" ,"7" = "Glutamatergic CNs",
+  "0" = "Midbrain Glutamatergic Cells", "1" = " GNP Transitionary Cells", "2" = "Migrating GNPs", "3" = "Bergmann Glia", "4" = "Cycling Progenitors",
+  "5" = "GABAergic Progenitors", "6" = "VZ Progenitor Cells" ,"7" = "Glutamatergic CNs",
   "8" = "GABAergic Interneurons", "9" = "Early Progenitor Cells","10" = "Roof Plate Cells",
   "11" = "Radial Glial Cells", "12" = "Glutamatergic CNs", "13" = "Early Progenitor Cells", "14" = "Erythrocytes","15" = "GABAergic Interneurons","16" = "Endothelial Cell Precursors",
-  "17" = "Microglia", "18" = "Mesodermal Cells?", "19" = "GABAergic Interneurons?",
+  "17" = "Microglia", "18" = "Mesodermal Cells?", "19" = "GABA-ergic Interneurons",
   "20" = "Pericytes","21" = "Erythrocytes","22" = "Oligodendrocytes",
   "23" = "Ciliated Cells")
 
 merged_obj <- RenameIdents(merged_obj, cluster_ids)
 
+#Reset Labels
+Idents(merged_obj) <- "seurat_clusters"
+
+table(Idents(merged_obj))
+
+cluster_df <- data.frame(
+  Barcode = colnames(merged_obj),
+  Cluster = as.character(Idents(merged_obj))
+)
+
+write.csv(cluster_df, "custom_clusters.csv", row.names = FALSE)
 
 
 cluster_ids2 <- c(
