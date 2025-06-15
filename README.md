@@ -10,5 +10,6 @@ Cerebellar NPCs arising at mouse embryonic days E10.5-11.5 remain plastic for st
 
 The data was analyzed in Rstudio using Seurat and Monocle3. The workflow has been outlined below: 
 
-![image not found]('Flowchart (1).png')
+
+![Flowchart (1)](https://github.com/user-attachments/assets/31ad33ac-2d8a-4069-b78f-2f55f3d3253f)
 
