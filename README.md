@@ -1,6 +1,6 @@
 # Developing Murine Cerebellum scRNA Analysis
 
-This project aims to explore the trajectory of early Neural Progenitor Cell linefes in the developing murine cerebellum. Samples were retrieved from 12 critical developmental timepoints from embronic day E10 to postnatal day P10. The data was retrieved from the NCBIs GEO Accession Viewer (GEO Accession GSE224466). 
+The goal of this project is to explore the trajectory of early Neural Progenitor Cell (NPC) lineages in the developing murine cerebellum. Brain tissue samples were collected from 12 critical developmental timepoints randing from embryonic day E10 to postnatal day P10. The scRNA-seq data was retrieved from the GEO Accession Viewer (GEO Accession GSE224466). 
 
 # Hypothesis 
 
@@ -8,5 +8,7 @@ Cerebellar NPCs arising at mouse embryonic days E10.5-11.5 remain plastic for st
 
 # Methodology
 
-Samples were analyzed in Rstudio using Seurat and Monocle3. 
+The data was analyzed in Rstudio using Seurat and Monocle3. The workflow has been outlined below: 
+
+![image not found](image-url)
 
