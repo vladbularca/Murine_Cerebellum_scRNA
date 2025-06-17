@@ -10,13 +10,19 @@ library("Seurat")
 library("tidyverse")
 library("Matrix")
 library("stringr")
-library("dplyr")
+library("dplyr")n
 library("ggplot2")
 library("reshape2")
 library("purrr")
 library("hdf5r")
 library("remotes")
 library("loupeR")
+library("devtools")
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("monocle3")
+library("monocle3")
+
 ```
 
 
@@ -311,13 +317,14 @@ table(merged_obj2$seurat_clusters)
 ``` {r}
 # Checking # of PCAs to use for UMAP
 
+
 ElbowPlot(merged_obj, ndims = 40)
-ElbowPlot(merged_obj2, ndims = 40)
+#ElbowPlot(merged_obj2, ndims = 40)
 
 #Visualization of UMAP
 
 DimPlot(merged_obj, reduction = "umap", label = TRUE, group.by = "seurat_clusters")
-DimPlot(merged_obj2, reduction = "umap", label = TRUE, group.by = "seurat_clusters")
+#DimPlot(merged_obj2, reduction = "umap", label = TRUE, group.by = "seurat_clusters")
 
 
 # DoHeatmap(obj, features = unique(top_markers[["E12"]]$gene))
@@ -380,6 +387,9 @@ cluster_ids2 <- c(
 
 merged_obj <- RenameIdents(merged_obj, cluster_ids2)
 
+DimPlot(merged_obj, reduction = "umap", label = TRUE, repel = TRUE) +    NoLegend() + ggtitle("UMAP of Cell Clusters") +  theme(plot.title = element_text(size = 4, face = "bold"))
+
+
 #Reset Labels
 Idents(merged_obj) <- "seurat_clusters"
 
@@ -392,10 +402,35 @@ cluster_df <- data.frame(
 
 write.csv(cluster_df, "custom_clusters2.csv", row.names = FALSE)
 
-
-
 # check cell labelin in Loupe and also CellxFate, see any differences
 ```
+
+```{r}
+# removing midbrain cells
+
+midbrain_genes <- c("Tlx3", "Isl1", "Dlk1", "Otx2", "Sncg")
+
+quantile(merged_obj$MidbrainScore1, probs = 0.99)
+
+sum(merged_obj$MidbrainScore1 > 1.1)
+
+merged_obj <- AddModuleScore(merged_obj, features = list(midbrain_genes), name = "MidbrainScore")
+
+seurat_final <- subset(merged_obj, subset = MidbrainScore1 <= 1.1)
+
+saveRDS(seurat_final, file = "seurat_final.rds")
+#seurat_final <- readRDS("seurat_final.rds")
+
+```
+
+```{r}
+# subsetting to clusters of interest
+
+```
+
+
+
+
 
 ``` {r}
 # Average expression
@@ -414,7 +449,9 @@ expr_matrix <- agg_expr$RNA
 head(sort(expr_matrix[,"g5"], decreasing = TRUE), 20)
 
 ```
-DimPlot(merged_obj, reduction = "umap", label = TRUE, repel = TRUE) +    NoLegend() + ggtitle("UMAP of Cell Clusters") +  theme(plot.title = element_text(size = 4, face = "bold"))
+
+
+
 
 ``` {r}
 # Creating Loupe objects for further analysis
