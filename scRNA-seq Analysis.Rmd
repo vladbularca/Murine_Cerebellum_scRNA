@@ -10,18 +10,20 @@ library("Seurat")
 library("tidyverse")
 library("Matrix")
 library("stringr")
-library("dplyr")n
+library("dplyr")
 library("ggplot2")
 library("reshape2")
 library("purrr")
 library("hdf5r")
 library("remotes")
+library("R.utils")
 library("loupeR")
 library("devtools")
 if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
-BiocManager::install("monocle3")
+library("SeuratWrappers")
 library("monocle3")
+
 
 ```
 
@@ -387,7 +389,7 @@ cluster_ids2 <- c(
 
 merged_obj <- RenameIdents(merged_obj, cluster_ids2)
 
-DimPlot(merged_obj, reduction = "umap", label = TRUE, repel = TRUE) +    NoLegend() + ggtitle("UMAP of Cell Clusters") +  theme(plot.title = element_text(size = 4, face = "bold"))
+DimPlot(seurat_final, reduction = "umap", label = TRUE, repel = TRUE) +    NoLegend() + ggtitle("UMAP of Cell Clusters") +  theme(plot.title = element_text(size = 4, face = "bold"))
 
 
 #Reset Labels
@@ -406,28 +408,132 @@ write.csv(cluster_df, "custom_clusters2.csv", row.names = FALSE)
 ```
 
 ```{r}
+DimPlot(seurat_final, reduction = "umap", label = TRUE, repel = TRUE) +    NoLegend() + ggtitle("UMAP of Cell Clusters") +  theme(plot.title = element_text(size = 4, face = "bold"))
+
+
+```
+
+
+```{r}
 # removing midbrain cells
 
-midbrain_genes <- c("Tlx3", "Isl1", "Dlk1", "Otx2", "Sncg")
+midbrain_genes <- c("Tlx3", "Isl1", "Dlk1", "Otx2", "Sncg", "Tal2", "Phox2a", "Phox2b")
 
-quantile(merged_obj$MidbrainScore1, probs = 0.99)
+seurat_final <- AddModuleScore(seurat_final, features = list(midbrain_genes), name = "MidbrainScore")
 
-sum(merged_obj$MidbrainScore1 > 1.1)
 
-merged_obj <- AddModuleScore(merged_obj, features = list(midbrain_genes), name = "MidbrainScore")
+quantile(seurat_final$MidbrainScore1, probs = 0.98)
+sum(seurat_final$MidbrainScore1 > 0.275)
 
-seurat_final <- subset(merged_obj, subset = MidbrainScore1 <= 1.1)
+table(seurat_final$seurat_clusters)
 
-saveRDS(seurat_final, file = "seurat_final.rds")
-#seurat_final <- readRDS("seurat_final.rds")
+seurat_final <- subset(seurat_final, subset = MidbrainScore1 <= 0.25)
+
+
+VlnPlot(seurat_final, features = "MidbrainScore1", group.by = "seurat_clusters")
+
+
+
+
+# saveRDS(seurat_final, file = "seurat_final.rds")
+seurat_final <- readRDS("seurat_final.rds")
 
 ```
 
 ```{r}
-# subsetting to clusters of interest
+# sub-setting to clusters of interest
+
+selected_clusters <- c("Early Purkinje Progenitors", "Early GABAergic Progenitors", "Early NPCs", "Glutamatergic CNs", "Purkinje Cells", "GABAergic Interneurons", "Glutamatergic Progenitors",
+"Early GABAergic Progenitors", "Glutamatergic Progenitors", "Early NPCs 2", "GABAergic Neuron Precursors", "Bergmann Glia", "GABAergic Progenitors", "Roof Plate Cells", "Astrocytes", "GABAergic Progenitors", "GABAergic Neurons", "Cycling Early NPCs")
+
+# Potentially try keeping by stage
+
+seurat_final <- subset(seurat_final, idents = selected_clusters)
+
 
 ```
 
+```{r}
+# Regressing out cell cycle markers
+
+# Cell cycle scoring and variable to regress: 
+s.genes <- cc.genes$s.genes
+ 
+g2m.genes <- cc.genes$g2m.genes
+ 
+# Temporary normalization (creates "data" layer)
+ 
+merged <- NormalizeData(merged, assay = "RNA")
+ 
+# Score cell cycle phases
+ 
+merged <- CellCycleScoring(merged,
+                           s.features = s.genes,
+                           g2m.features = g2m.genes,
+                           assay = "RNA")
+ 
+ 
+# With cell cycle phase differences regressed out
+merged$CC.Difference <- merged$S.Score - merged$G2M.Score
+
+
+```
+
+
+
+```{r}
+# Monocle, turn Seurat to CDS
+
+cds <- as.cell_data_set(seurat_final)
+
+cds@clusters$UMAP$partitions
+
+# assigning all cells to one partition
+
+recreate.partition <- c(rep(1, length(cds@colData@rownames)))
+names(recreate.partition) <- cds@colData@rownames
+recreate.partition <- as.factor(recreate.partition)
+
+cds@clusters$UMAP$partitions <- recreate.partition
+
+list_cluster<- seurat_final@active.ident
+cds@clusters$UMAP$clusters <- list_cluster
+
+#cluster_ids_subset <- cluster_ids2[selected_clusters]
+
+#cds@clusters$UMAP$clusters <- as.character(Idents(seurat_final))
+#cds@colData$celltype <- as.character(Idents(seurat_final))
+# check if there are discrepancies between clustering 
+
+cds@int_colData@listData$reducedDims$UMAP <- seurat_final@reductions$umap@cell.embeddings
+
+
+cds <- cluster_cells(cds)
+
+# Construct principal trajectory path, which 
+cds <- learn_graph(cds, use_partition = FALSE)
+
+#midbrain vs gabaergic neruon trajectory
+
+cds <- order_cells(cds)
+
+cds <- order_cells(cds, root_cells = colnames(cds)[cds@colData$celltype == "Roof Plate Cells"])
+
+cds <- order_cells(cds, root_cells =colnames(cds)[cds@colData$celltype == "Early NPCs"])
+
+table(partitions(cds))
+
+
+
+plot_cells(cds, color_cells_by = "pseudotime")
+
+plot_cells(cds, color_cells_by = "cluster", label_groups_by_cluster = FALSE, label_branch_points = FALSE, label_roots = TRUE, label_leaves = FALSE,  group_label_size = 4) + theme(legend.position = "right")
+
+cluster.before.t <- plot_cells(cds, color_cells_by = "cluster", label_groups_by_cluster = FALSE, group_label_size = 5) + theme(legend.position = "right")
+
+
+cluster.before.t | cluster.names
+```
 
 
 
