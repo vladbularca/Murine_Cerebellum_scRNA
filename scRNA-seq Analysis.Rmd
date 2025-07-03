@@ -23,7 +23,7 @@ if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
 library("SeuratWrappers")
 library("monocle3")
-
+library("gtools")
 
 ```
 
@@ -40,7 +40,7 @@ all_files <- list.files(raw_dir, full.names = TRUE, recursive = FALSE)
 prefixes <- unique(gsub("_(barcodes|genes|matrix)\\.tsv$|_matrix\\.mtx$", "", basename(all_files)))
 
 
-# Create sub-folders and move files
+# Create sub-folders and move files 
 
 for (prefix in prefixes) {
   sample_dir <- file.path(raw_dir, prefix)
@@ -77,18 +77,45 @@ seurat_list[[1]]@meta.data
 
 lapply(seurat_list, function(x) x$sample[1])
 
+# Total Cells
+
+sum(sapply(seurat_list, ncol))
+
 # Number of cells with 0 RNA counts for each sample before filtering 
 
 sapply(seurat_list, function(seurat_obj) {sum(seurat_obj$nCount_RNA == 0, na.rm = TRUE)})
 
 # 12,13 and 14 have a very high percentage of cells with 0 UMI counts
 
+# Removing barcodes from the sample name for each cell
+
+for (i in seq_along(seurat_list)) {
+  seurat_list[[i]]$orig.ident <- sub("^[^ ]+\\s+", "", seurat_list[[i]]$orig.ident)
+}
+
+# Adding names to each Seurat object within list
+
+names(seurat_list) <- sapply(seurat_list, function(obj) unique(obj$orig.ident))
+
+for (i in seq_along(seurat_list)) {
+  seurat_list[[i]]$sample <- names(seurat_list)[i]
+}
+
+# Sorting based on developmental stage
+
+label_part <- sub(".*_(PAN[-_]CB[_-].*)", "\\1", names(seurat_list))
+
+sorted_indices <- mixedorder(label_part)
+
+seurat_list <- seurat_list[sorted_indices]
+
 ```
 
 ```{r}
-# Identifying mitochondrial and ribosomal protein genes
+# Identifying mitochondrial genes and creating a mitochondial percentage column for each cell 
 
 genes_file <- "GSE224466_RAW/GSM7024833_PAN_CB_E13_A/genes.tsv"
+
 genes_df <- read.table(genes_file, header = FALSE, col.names = c("ensembl_id", "gene_symbol"))
 mito_genes_symbols <- grep("^mt-", genes_df$gene_symbol, value = TRUE, ignore.case = TRUE)
 mito_ensembl_ids <- genes_df$ensembl_id[genes_df$gene_symbol %in% mito_genes_symbols]
@@ -102,6 +129,7 @@ seurat_list <- lapply(seurat_list, function(seurat_obj) {
 
 head(seurat_list[[1]][["percent.mt"]])
 
+# Identifying ribosomal genes and creating a ribosomal percentage column for each cell 
 
 ribo_genes_symbols <- grep("^Rp[sl]", genes_df$gene_symbol, value = TRUE, ignore.case = TRUE)
 ribo_genes_symbols <- ribo_genes_symbols[!grepl("ka|kc|-ps", ribo_genes_symbols)]
@@ -116,16 +144,15 @@ seurat_list <- lapply(seurat_list, function(seurat_obj) {
 
 head(seurat_list[[1]][["percent.ribo"]])
 
+
 ```
+
+
+
 ``` {r}
-# Sub-setting each object to filter out genes with over 10 % mitochondrial DNA, remove mitochondrial and ribosomal genes and filtering out cells with less than 3500 or 2000 unique transcripts and over 15,000 transcripts. 
+# Sub-setting each object to filter out cells with over 10 % mitochondrial DNA, remove mitochondrial and ribosomal genes and filtering out cells with less than 3200 total transcripts and over 15,000 transcripts. 
 
 filtered_list <- lapply(seurat_list, function (seurat_obj) {
-  seurat_obj <- subset(seurat_obj, subset = percent.mt < 10)
-  return (seurat_obj)
-})
-
-filtered_list2 <- lapply(seurat_list, function (seurat_obj) {
   seurat_obj <- subset(seurat_obj, subset = percent.mt < 10)
   return (seurat_obj)
 })
@@ -139,20 +166,9 @@ filtered_list <- lapply(filtered_list, function(seurat_obj) {
   subset(seurat_obj, features = genes_keep)
 })
 
-filtered_list2 <- lapply(filtered_list2, function(seurat_obj) {
-  genes_keep <- setdiff(rownames(seurat_obj), genes_to_remove)
-  subset(seurat_obj, features = genes_keep)
-})
-  
-
 
 filtered_list <- lapply(filtered_list, function (seurat_obj) {
-  seurat_obj <- subset(seurat_obj, subset =  nCount_RNA > 3200 & nCount_RNA < 15000)
-  return (seurat_obj)
-})
-
-filtered_list2 <- lapply(seurat_list, function (seurat_obj) {
-  seurat_obj <- subset(seurat_obj, subset =  nCount_RNA > 2750 & nCount_RNA < 15000)
+  seurat_obj <- subset(seurat_obj, subset =  nCount_RNA > 3200 & nCount_RNA < 15000 & nFeature_RNA > 500)
   return (seurat_obj)
 })
 
@@ -166,36 +182,21 @@ filtered_list <- lapply(filtered_list, function(obj) {
 })
 
 
-filtered_list2 <- lapply(filtered_list2, function(obj) {
-  counts <- GetAssayData(obj, slot = "counts")
-  genes_to_keep <- rowSums(counts) > 0
-  subset(obj, features = names(genes_to_keep[genes_to_keep]))
-})
-
-saveRDS(filtered_list, file = "filtered_list.rds")
-# filtered_list <- readRDS("filtered_list.rds"
-
-
-saveRDS(filtered_list2, file = "filtered_list2.rds")
-#filtered_list2 <- readRDS("filtered_list2.rds")
-
+# saveRDS(filtered_list, file = "filtered_list.rds")
+# filtered_list <- readRDS("filtered_list.rds")
 
 
 # Summary statistics for each object 
 
 lapply(filtered_list, function(seurat_obj) {summary(seurat_obj$nCount_RNA)})
-lapply(filtered_list2, function(seurat_obj) {summary(seurat_obj$nCount_RNA)})
+
 
 # Count of cells after filtering
 
-for (i in seq_along()) {cat("Sample", i, "has", ncol(filtered_list[[i]]), "cells after filtering\n")}
-
-for (i in seq_along(filtered_list2)) {cat("Sample", i, "has", ncol(filtered_list2[[i]]), "cells after filtering\n")}
+for (i in seq_along(filtered_list)) {cat("Sample", i, "has", ncol(filtered_list[[i]]), "cells after filtering\n")}
 
 # Mean nCount_RNA after filtering
 sapply(filtered_list, function(obj) {tapply(obj$nCount_RNA, obj$sample, mean)})
-sapply(filtered_list2, function(obj) {tapply(obj$nCount_RNA, obj$sample, mean)})
-
 
 ```
 
@@ -218,7 +219,7 @@ sapply(filtered_list, ncol)
 
 sum(sapply(filtered_list, ncol))
 
-sapply(seurat_list, function(seurat_obj) {sum(seurat_obj$nCount_RNA == 0, na.rm = TRUE)})
+sapply(filtered_list, function(seurat_obj) {sum(seurat_obj$nCount_RNA == 0, na.rm = TRUE)})
 
 sapply(seurat_list, function(seurat_obj) {sum(seurat_obj$nCount_RNA > 2000 & seurat_obj$nCount_RNA < 15000, na.rm = TRUE)})
 
@@ -227,10 +228,7 @@ sapply(seurat_list, function(seurat_obj) {sum(seurat_obj$nCount_RNA > 2000 & seu
 
 
 ``` {r}
-
-sample_names <- sapply(filtered_list, function(x) unique(x$sample))
-names(filtered_list) <- sample_names
-names(filtered_list2) <- sample_names
+# Additional analysis (optional)
 
 summary_df <- data.frame(
   Sample = names(filtered_list),
@@ -259,18 +257,78 @@ ggplot(melted_df, aes(x = Sample, y = value, fill = variable)) +
 ``` {r}
 # Merging all objects into one Seurat object 
 
+sample_names <- sapply(filtered_list, function(x) unique(x$sample))
+names(filtered_list) <- sample_names
+
 filtered_list <- lapply(names(filtered_list), function(name) {
   RenameCells(filtered_list[[name]], add.cell.id = name)
 })
-names(filtered_list) <- sample_names
-merged_obj <- reduce(filtered_list, merge)
+merged_obj <- purrr::reduce(filtered_list, merge)
+
+# Maintaining only the developmental time period part of sample
+
+merged_obj$clean_ident <- gsub("-", "_", merged_obj$orig.ident)
+
+merged_obj$label_part <- sub(".*_(PAN_CB_[EP][0-9]+[A-Z]?)", "\\1", merged_obj$clean_ident)
+
+merged_obj$label_part <- gsub("_(?=[A-Z]$)", "", merged_obj$label_part, perl = TRUE)
 
 
-filtered_list2 <- lapply(names(filtered_list2), function(name) {
-  RenameCells(filtered_list2[[name]], add.cell.id = name)
-})
-names(filtered_list2) <- sample_names
-merged_obj2 <- reduce(filtered_list2, merge)
+unique_labels <- unique(merged_obj$label_part)
+
+ordered_labels <- c(
+  "PAN_CB_E10C", "PAN_CB_E10D", "PAN_CB_E11A", "PAN_CB_E11B",
+  "PAN_CB_E12A", "PAN_CB_E12B", "PAN_CB_E13A", "PAN_CB_E13B",
+  "PAN_CB_E14A", "PAN_CB_E14B", "PAN_CB_E15A", "PAN_CB_E15B",
+  "PAN_CB_E16C", "PAN_CB_E16D", "PAN_CB_E17A", "PAN_CB_E17B",
+  "PAN_CB_P0A",  "PAN_CB_P0B",  "PAN_CB_P4A",  "PAN_CB_P4B",
+  "PAN_CB_P7A",  "PAN_CB_P7B",  "PAN_CB_P10A", "PAN_CB_P10B"
+)
+
+merged_obj$label_part <- factor(merged_obj$label_part, levels = ordered_labels)
+
+
+# Plotting Different Features
+
+VlnPlot(merged_obj, features = "percent.mt", pt.size = 0.1, layer = "counts", group.by = "label_part") + NoLegend() + labs(x = "Sample", y = "Mitochondrial Gene %") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8), plot.title = element_blank()) 
+
+
+VlnPlot(merged_obj, features = "nCount_RNA", pt.size = 0.1, layer = "counts", group.by = "label_part") + NoLegend() + labs(x = "Sample", y = "Total UMI Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8), plot.title = element_blank()) 
+
+
+VlnPlot(merged_obj, features = "nFeature_RNA", pt.size = 0.1, layer = "counts", group.by = "label_part") + NoLegend() + labs(x = "Sample", y = "Feature Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8), plot.title = element_blank())
+
+cor_val <- round(cor(merged_obj$nCount_RNA, merged_obj$nFeature_RNA), 2)
+
+FeatureScatter(
+  merged_obj,
+  feature1 = "nCount_RNA",
+  feature2 = "nFeature_RNA"
+) +
+  NoLegend() +
+  ggtitle(NULL) +
+  annotate("text", x = 8000, y = 3000, label = paste("r =", cor_val), size = 4)
+
+
+df <- FetchData(merged_obj, vars = c("nCount_RNA", "label_part"))
+
+# Compute mean per sample
+means <- df %>%
+  group_by(label_part) %>%
+  summarize(mean_nCount = mean(nCount_RNA), .groups = "drop")
+
+# Plot
+ggplot(df, aes(x = label_part, y = nCount_RNA)) +
+  geom_jitter(width = 0.2, size = 0.4, alpha = 0.6) +
+  geom_point(data = means, aes(x = label_part, y = mean_nCount), 
+             color = "darkred", size = 2.0) +
+  labs(x = "Sample", y = "Average UMI Count") +
+  scale_y_continuous(breaks = seq(0, max(df$nCount_RNA), by = 1500)) +  # Set y-axis breaks
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8))
 
 ```
 
@@ -280,12 +338,40 @@ merged_obj2 <- reduce(filtered_list2, merge)
 
 merged_obj <- NormalizeData(merged_obj, verbose = FALSE)
 merged_obj <- FindVariableFeatures(merged_obj, selection.method = "vst", nfeatures = 2000, verbose = FALSE) # Based on the 2000 most variable features
-merged_obj <- ScaleData(merged_obj, vars.to.regress = c("percent.mt","nCount_RNA"), verbose = FALSE)
+
+dup_genes <- rownames(merged_obj[["RNA"]])[duplicated(rownames(merged_obj[["RNA"]]))]
+merged_obj <- merged_obj[!rownames(merged_obj[["RNA"]]) %in% dup_genes, ]
 
 
-merged_obj2 <- NormalizeData(merged_obj2, verbose = FALSE)
-merged_obj2 <- FindVariableFeatures(merged_obj2, selection.method = "vst", nfeatures = 2000, verbose = FALSE) # Based on the 2000 most variable features
-merged_obj2 <- ScaleData(merged_obj2, vars.to.regress = c("percent.mt","nCount_RNA"), verbose = FALSE)
+merged_obj <- JoinLayers(merged_obj)
+
+# Regressing out cell cycle markers
+
+valid_s_genes <- tolower(s.genes[s.genes %in% rownames(merged_obj)])
+valid_g2m_genes <- tolower(g2m.genes[g2m.genes %in% rownames(merged_obj)])
+ 
+# Temporary normalization (creates "data" layer)
+
+merged_obj <- NormalizeData(merged_obj, assay = "RNA")
+
+rownames(merged_obj) <- tolower(rownames(merged_obj))
+ 
+# Score cell cycle phases
+
+merged_obj <- CellCycleScoring(merged_obj, s.features = valid_s_genes, g2m.features = valid_g2m_genes, assay = "RNA", set.ident = TRUE)
+
+ 
+# With cell cycle phase differences regressed out
+merged_obj$CC.Difference <- merged_obj$S.Score - merged_obj$G2M.Score
+
+merged_obj <- ScaleData(merged_obj, vars.to.regress = "CC.Difference", verbose = FALSE)
+
+# Saving cell counts to a .csv
+
+cell_counts <- as.data.frame(table(merged_obj$label_part))
+colnames(cell_counts) <- c("Sample", "Number_of_Cells")
+
+write.csv(cell_counts, "cell_counts.csv", row.names = FALSE)
 
 ``` 
 
@@ -294,24 +380,22 @@ merged_obj2 <- ScaleData(merged_obj2, vars.to.regress = c("percent.mt","nCount_R
 # PCA, clustering and UMAP
 
 merged_obj <- RunPCA(merged_obj, features = VariableFeatures(merged_obj), npcs = 40, verbose = FALSE)
-merged_obj <- RunUMAP(merged_obj, dims = 1:40, verbose = FALSE)
 merged_obj <- FindNeighbors(merged_obj, dims = 1:40, verbose = FALSE)
 merged_obj <- FindClusters(merged_obj, resolution = 1.4, verbose = FALSE)
+merged_obj <- RunUMAP(merged_obj, dims = 1:40, verbose = FALSE)
 
-saveRDS(merged_obj, file = "merged_obj.rds")
+saveRDS(merged_obj, file = "merged_obj2.rds")
 #merged_obj <- readRDS("merged_obj.rds")
 
-merged_obj2 <- RunPCA(merged_obj2, features = VariableFeatures(merged_obj2), npcs = 40, verbose = FALSE)
-merged_obj2 <- RunUMAP(merged_obj2, dims = 1:40, verbose = FALSE)
-merged_obj2 <- FindNeighbors(merged_obj2, dims = 1:40, verbose = FALSE)
-merged_obj2 <- FindClusters(merged_obj2, resolution = 0.5, verbose = FALSE)
-
-saveRDS(merged_obj2, file = "merged_obj2.rds")
-#merged_obj2 <- readRDS("merged_obj2.rds")
 
 # Cluster summary
 table(merged_obj$seurat_clusters)
-table(merged_obj2$seurat_clusters)
+
+# Importing previously defined clusters
+barcode_clusters <- read.csv("custom_clusters2.csv", stringsAsFactors = FALSE)
+cluster_vec <- setNames(barcode_clusters$Cluster, barcode_clusters$Barcode)
+common_barcodes <- intersect(names(cluster_vec), colnames(merged_obj))
+Idents(merged_obj) <- factor(cluster_vec[common_barcodes])
 
 ```
 
@@ -319,35 +403,92 @@ table(merged_obj2$seurat_clusters)
 ``` {r}
 # Checking # of PCAs to use for UMAP
 
-
 ElbowPlot(merged_obj, ndims = 40)
-#ElbowPlot(merged_obj2, ndims = 40)
 
 #Visualization of UMAP
 
-DimPlot(merged_obj, reduction = "umap", label = TRUE, group.by = "seurat_clusters")
-#DimPlot(merged_obj2, reduction = "umap", label = TRUE, group.by = "seurat_clusters")
+DimPlot(merged_obj, reduction = "umap", label = TRUE, group.by = "seurat_clusters") + NoLegend()
+DimPlot(subset_obj, reduction = "umap", label = TRUE, group.by = "seurat_clusters") + NoLegend()
+DimPlot(merged_obj, reduction = "umap", label = TRUE, repel = TRUE) +  NoLegend() + theme(plot.title = element_text(size = 4, face = "bold"))
+
+# Sub-setting the data to include only cell types of cerebellar origin
+
+excluded_clusters <- c("29", "36", "39", "40", "41", "30", "28", "37", "38")
+
+Idents(merged_obj) <- "seurat_clusters"
+
+# Keep only embryonic stages and P0 (only if needed)
+# keep_timepoints <- grep("E1[0-4]", merged_obj$label_part, value = TRUE)
 
 
-# DoHeatmap(obj, features = unique(top_markers[["E12"]]$gene))
+subset_obj <- subset(merged_obj, idents = setdiff(levels(merged_obj), excluded_clusters))
 
+#subset_obj <- subset(
+  merged_obj,
+  subset = !(Idents(merged_obj) %in% excluded_clusters) & label_part %in% keep_timepoints
+  )
+
+# label_part %in% keep_timepoints
 ``` 
 
+```{r}
+# removing midbrain cells
+
+midbrain_genes <- tolower(c("TLX3", "ISL1", "DLK1", "OTX2", "SNCG", "TAL2", "PHOX2A", "PHOX2B"))
+
+DefaultAssay(subset_obj) <- "RNA"
+subset_obj <- NormalizeData(subset_obj, assay = "RNA")
+
+subset_obj <- AddModuleScore(subset_obj, features = list(midbrain_genes), name = "MidbrainScore", assay = "RNA", slot = "data")
+
+# Determine the threshold for filtering midbrain genes
+
+quantile(seurat_final$MidbrainScore1, probs = 0.95)
+sum(seurat_final$MidbrainScore1 > 0.275)
+table(seurat_final$seurat_clusters)
+
+FeaturePlot(subset_obj, features = "MidbrainScore1") + labs(title = "Midbrain Score")
+
+subset_obj<- subset(subset_obj, subset = MidbrainScore1 <= 0.25)
+
+VlnPlot(subset_obj, features = "MidbrainScore1", group.by = "seurat_clusters")
 
 
+# Get the counts matrix
+counts <- GetAssayData(rna_assay, slot = "counts")
+# Remove duplicated genes
+counts <- counts[!duplicated(rownames(counts)), ]
+# Create a new RNA assay
+new_rna <- CreateAssayObject(counts = counts)
+# Replace the old RNA assay
+seurat_final[["RNA"]] <- new_rna
+
+# Re-clustering the data after removing midbrain cells and keeping only clusters of interest
+
+seurat_final3 <- NormalizeData(subset_obj)
+seurat_final3 <- FindVariableFeatures(seurat_final3, selection.method = "vst", nfeatures = 2000, verbose = FALSE) # Based on the 2000 most variable features
+
+seurat_final3<- ScaleData(seurat_final3, vars.to.regress = "CC.Difference", verbose = FALSE)
+
+seurat_final3 <- RunPCA(seurat_final3, features = VariableFeatures(seurat_final3), npcs = 40, verbose = FALSE)
+seurat_final3 <- FindNeighbors(seurat_final3, dims = 1:40, verbose = FALSE)
+seurat_final3 <- FindClusters(seurat_final3, resolution = 1.2, verbose = FALSE)
+
+seurat_final3 <- RunUMAP(seurat_final3, dims = 1:40, verbose = FALSE)
+
+DimPlot(seurat_final3, reduction = "umap", label = TRUE, group.by = "seurat_clusters") + NoLegend()
 
 
-
-``` {r}
-# Determination and Annotation of marker genes for each cluster
-
-merged_obj <- JoinLayers(merged_obj)
-all_markers <- FindAllMarkers(merged_obj, assay ="RNA", slot = "data", only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+barcode_clusters <- read.csv("custom_clusters3.csv", stringsAsFactors = FALSE)
+cluster_vec <- setNames(barcode_clusters$Cluster, barcode_clusters$Barcode)
+common_barcodes <- intersect(names(cluster_vec), colnames(seurat_final3))
+Idents(seurat_final3)[common_barcodes] <- cluster_vec[common_barcodes]
 
 
-merged_obj2 <- JoinLayers(merged_obj2)
-all_markers2 <- FindAllMarkers(merged_obj2, assay ="RNA", slot = "data", only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+seurat_final3 <- JoinLayers(seurat_final3)
 
+
+all_markers <- FindAllMarkers(seurat_final, assay ="RNA", slot = "data", only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
 
 names(all_markers)
 
@@ -355,14 +496,36 @@ top_markers <- all_markers %>%
     group_by(cluster) %>%
     slice_max(order_by = avg_log2FC, n = 15) %>%
     ungroup()
+ 
+saveRDS(seurat_final, file = "seurat_final2.rds")
+seurat_final <- readRDS("seurat_final2.rds")
 
-top_markers2 <- all_markers2 %>%
-    group_by(cluster) %>%
-    slice_max(order_by = avg_log2FC, n = 10) %>%
-    ungroup()
+cluster_ids3 <- c(
+  "0" = "Early Progenitors 1", "1" = "Bergmann Glia", "2" = "GABAergic Progenitors", "3" = "Early VZ Progenitors", "4" = "Oligodendrocyte Precursors",
+  "5" = "Cycling Progenitors", "6" = "GNPs" ,"7" = "GABAergic Neuron Precursors",
+  "8" = "Glutamatergic CNs", "9" = "Early VZ Progenitors","10" = "Astrocyte Progenitors",
+  "11" = "Purkinje Progenitors", "12" = "GABAergic Neuron Precursors", "13" = "Early Progenitors 3", "14" = "Early Progenitors 2","15" = "GABAergic Interneurons","16" = "RL Progenitors",
+  "17" = "Glutamatergic CNs", "18" = "GABAergic Interneurons", "19" = "GABAergic Neurons?",
+  "20" = "Roof Plate Cells","21" = "Purkinje Cells","22" = "VZ Progenitors",
+  "23" = "Oligodendrocyte Progenitors", "24" = "Epithelial Cells" )
+
+
+seurat_final <- RenameIdents(seurat_final, cluster_ids3)
+
+Idents(seurat_final) <- "seurat_clusters"
+
+cluster_df <- data.frame(
+  Barcode = colnames(seurat_final),
+  Cluster = as.character(Idents(seurat_final))
+)
+
+write.csv(cluster_df, "custom_clusters3.csv", row.names = FALSE)
+
 
 
 ```
+
+
 
 ```{r}
 # Manual annotation of each cluster
@@ -389,7 +552,7 @@ cluster_ids2 <- c(
 
 merged_obj <- RenameIdents(merged_obj, cluster_ids2)
 
-DimPlot(seurat_final, reduction = "umap", label = TRUE, repel = TRUE) +    NoLegend() + ggtitle("UMAP of Cell Clusters") +  theme(plot.title = element_text(size = 4, face = "bold"))
+DimPlot(seurat_final, reduction = "umap", label = TRUE, repel = TRUE) + NoLegend() + ggtitle("UMAP of Cell Clusters") +  theme(plot.title = element_text(size = 4, face = "bold"))
 
 
 #Reset Labels
@@ -407,38 +570,12 @@ write.csv(cluster_df, "custom_clusters2.csv", row.names = FALSE)
 # check cell labelin in Loupe and also CellxFate, see any differences
 ```
 
+
 ```{r}
 DimPlot(seurat_final, reduction = "umap", label = TRUE, repel = TRUE) +    NoLegend() + ggtitle("UMAP of Cell Clusters") +  theme(plot.title = element_text(size = 4, face = "bold"))
 
-
 ```
 
-
-```{r}
-# removing midbrain cells
-
-midbrain_genes <- c("Tlx3", "Isl1", "Dlk1", "Otx2", "Sncg", "Tal2", "Phox2a", "Phox2b")
-
-seurat_final <- AddModuleScore(seurat_final, features = list(midbrain_genes), name = "MidbrainScore")
-
-
-quantile(seurat_final$MidbrainScore1, probs = 0.98)
-sum(seurat_final$MidbrainScore1 > 0.275)
-
-table(seurat_final$seurat_clusters)
-
-seurat_final <- subset(seurat_final, subset = MidbrainScore1 <= 0.25)
-
-
-VlnPlot(seurat_final, features = "MidbrainScore1", group.by = "seurat_clusters")
-
-
-
-
-# saveRDS(seurat_final, file = "seurat_final.rds")
-seurat_final <- readRDS("seurat_final.rds")
-
-```
 
 ```{r}
 # sub-setting to clusters of interest
@@ -448,35 +585,8 @@ selected_clusters <- c("Early Purkinje Progenitors", "Early GABAergic Progenitor
 
 # Potentially try keeping by stage
 
+
 seurat_final <- subset(seurat_final, idents = selected_clusters)
-
-
-```
-
-```{r}
-# Regressing out cell cycle markers
-
-# Cell cycle scoring and variable to regress: 
-s.genes <- cc.genes$s.genes
- 
-g2m.genes <- cc.genes$g2m.genes
- 
-# Temporary normalization (creates "data" layer)
- 
-merged <- NormalizeData(merged, assay = "RNA")
- 
-# Score cell cycle phases
- 
-merged <- CellCycleScoring(merged,
-                           s.features = s.genes,
-                           g2m.features = g2m.genes,
-                           assay = "RNA")
- 
- 
-# With cell cycle phase differences regressed out
-merged$CC.Difference <- merged$S.Score - merged$G2M.Score
-
-
 ```
 
 
@@ -484,7 +594,7 @@ merged$CC.Difference <- merged$S.Score - merged$G2M.Score
 ```{r}
 # Monocle, turn Seurat to CDS
 
-cds <- as.cell_data_set(seurat_final)
+cds <- as.cell_data_set(seurat_final3)
 
 cds@clusters$UMAP$partitions
 
@@ -493,10 +603,9 @@ cds@clusters$UMAP$partitions
 recreate.partition <- c(rep(1, length(cds@colData@rownames)))
 names(recreate.partition) <- cds@colData@rownames
 recreate.partition <- as.factor(recreate.partition)
-
 cds@clusters$UMAP$partitions <- recreate.partition
 
-list_cluster<- seurat_final@active.ident
+list_cluster<- seurat_final3@active.ident
 cds@clusters$UMAP$clusters <- list_cluster
 
 #cluster_ids_subset <- cluster_ids2[selected_clusters]
@@ -505,7 +614,7 @@ cds@clusters$UMAP$clusters <- list_cluster
 #cds@colData$celltype <- as.character(Idents(seurat_final))
 # check if there are discrepancies between clustering 
 
-cds@int_colData@listData$reducedDims$UMAP <- seurat_final@reductions$umap@cell.embeddings
+cds@int_colData@listData$reducedDims$UMAP <- seurat_final3@reductions$umap@cell.embeddings
 
 
 cds <- cluster_cells(cds)
@@ -513,15 +622,22 @@ cds <- cluster_cells(cds)
 # Construct principal trajectory path, which 
 cds <- learn_graph(cds, use_partition = FALSE)
 
+
 #midbrain vs gabaergic neruon trajectory
+
+
+cds <- order_cells(cds, reduction_method = 'UMAP', root_cells = colnames(cds)[cds@clusters$UMAP$clusters == "Early Progenitors 1"])
 
 cds <- order_cells(cds)
 
-cds <- order_cells(cds, root_cells = colnames(cds)[cds@colData$celltype == "Roof Plate Cells"])
+#cds <- order_cells(cds, reduction_method = 'UMAP', root_cells = colnames(cds)[cds@clusters$UMAP$clusters == "GABAergic Progenitors"])
 
-cds <- order_cells(cds, root_cells =colnames(cds)[cds@colData$celltype == "Early NPCs"])
 
-table(partitions(cds))
+
+#cds <- order_cells(cds, root_cells =colnames(cds)[cds@colData$celltype == "Roof Plate Cells"])
+# <- order_cells(cds, root_cells =colnames(cds)[cds@colData$celltype == "Early Progenitors 1"])
+
+#table(partitions(cds))
 
 
 
@@ -529,10 +645,31 @@ plot_cells(cds, color_cells_by = "pseudotime")
 
 plot_cells(cds, color_cells_by = "cluster", label_groups_by_cluster = FALSE, label_branch_points = FALSE, label_roots = TRUE, label_leaves = FALSE,  group_label_size = 4) + theme(legend.position = "right")
 
-cluster.before.t <- plot_cells(cds, color_cells_by = "cluster", label_groups_by_cluster = FALSE, group_label_size = 5) + theme(legend.position = "right")
 
 
-cluster.before.t | cluster.names
+cds$monocle3.pseudotime <- pseudotime(cds)
+
+data.pseudo <- as.data.frame(colData(cds))
+
+ggplot(data.pseudo, aes(monocle3.pseudotime, reorder(ident, monocle3.pseudotime, median))) + geom_boxplot()
+
+
+# Genes that change as a function of pseudotime:
+  
+
+deg <- graph_test(cds, neighbor_graph = 'principal_graph', cores = 4)
+
+# filter using q values
+
+deg %>%
+  arrange(q_value) %>%
+  filter (status == 'ok') %>%
+  head()
+
+FeaturePlot(seurat_final, features = c('RGS20', 'RRS1', 'ADHFE1'  ))
+
+# gene enrichment or pathway analysis
+
 ```
 
 
@@ -570,9 +707,14 @@ merged_obj_2 <- JoinLayers(merged_obj2)
 
 create_loupe_from_seurat(merged_obj_2, output_name = "loupe_2")
 
+seurat_final <- JoinLayers(seurat_final)
 
-options(Seurat.object.assay.version = "v3")
-options(Seurat.object.assay.version = "v4")
+create_loupe_from_seurat(seurat_final, output_name = "loupe_3")
+
+seurat_final3 <- JoinLayers(seurat_final3)
+
+create_loupe_from_seurat(seurat_final3, output_name = "loupe_5")
+
 ```
 
 
